@@ -1,0 +1,123 @@
+// Basic types
+WHITESPACE = _{ " " | "\t" }
+COMMENT = _{ ";" ~ (!"\n" ~ ANY)* } // Comments start with ";"
+
+dec = @{ ASCII_DIGIT+ } // Decimal numbers
+hex = @{ ASCII_HEX_DIGIT+ } // Hexadecimal numbers
+
+// Common types
+domain = @{ (domain_seg ~ ".")+ } // Domain names ends with "."
+    domain_seg = @{ (ASCII_ALPHANUMERIC | "-" | "_")+ }
+
+text = @{ (!("\"" | "\\") ~ ANY)* ~ (escape ~ text)? }
+    escape = @{ "\\" ~ ("\"" | "\\" | "/" | "b" | "f" | "n" | "r" | "t") }
+
+quoted_string = { "\"" ~ text ~ "\"" } // Copied from the official JSON example
+
+class = { "IN" }
+priority = @{ dec }
+weight = @{ dec }
+port = @{ dec }
+ttl = @{ dec }
+algorithm = @{ ASCII_DIGIT{1} }
+fingerprint = @{ hex }
+
+ip_v4 = @{ (ip_v4_seg ~ "."){3} ~ ip_v4_seg } // Match valid IPv4 addresses
+    ip_v4_seg = @{ ip_v4_seg_25x | ip_v4_seg_2xx | ip_v4_seg_1xx | ip_v4_seg_xx | ip_v4_seg_x }
+        ip_v4_seg_x = @{ ASCII_DIGIT{1} }
+        ip_v4_seg_xx = @{ ASCII_NONZERO_DIGIT{1} ~ ASCII_DIGIT{1} }
+        ip_v4_seg_1xx = @{ "1" ~ ASCII_DIGIT{2} }
+        ip_v4_seg_2xx = @{ "2" ~ ( '1'..'4' ) ~ ASCII_DIGIT{1} }
+        ip_v4_seg_25x = @{ "25" ~ ( '1'..'5' ) }
+
+ip_v6 = @{
+    ip_v6_full  | ip_v6_link_local |  ip_v6_v4_mapped | ip_v6_v4_embedded |
+    ip_v6_short_0 | ip_v6_short_1 | ip_v6_short_2 | ip_v6_short_3 |
+    ip_v6_short_4 | ip_v6_short_5 | ip_v6_short_6 | ip_v6_short_7
+}
+    ip_v6_full = @{ (ip_v6_seg ~ ":"){7,7} ~ ip_v6_seg }
+    ip_v6_short_0 = @{ ":" ~ (":" ~ ip_v6_seg ){1,7} }
+    ip_v6_short_1 = @{ (ip_v6_seg ~ ":"){1,1} ~ ( ":" ~ ip_v6_seg ){1,6} }
+    ip_v6_short_2 = @{ (ip_v6_seg ~ ":"){1,2} ~ ( ":" ~ ip_v6_seg ){1,5} }
+    ip_v6_short_3 = @{ (ip_v6_seg ~ ":"){1,3} ~ ( ":" ~ ip_v6_seg ){1,4} }
+    ip_v6_short_4 = @{ (ip_v6_seg ~ ":"){1,4} ~ ( ":" ~ ip_v6_seg ){1,3} }
+    ip_v6_short_5 = @{ (ip_v6_seg ~ ":"){1,5} ~ ( ":" ~ ip_v6_seg ){1,2} }
+    ip_v6_short_6 = @{ (ip_v6_seg ~ ":"){1,6} ~ ( ":" ~ ip_v6_seg ){1,1} }
+    ip_v6_short_7 = @{ (ip_v6_seg ~ ":"){1,7} ~ ":" }
+    ip_v6_link_local = @{ "fe80:" ~ (":" ~ ip_v6_seg){0,4} ~ ("%" ~ ASCII_ALPHANUMERIC+)? }
+    ip_v6_v4_mapped = @{ "::" ~ ("ffff" ~ (":0"{1,4}){0,1} ~ ":"){0,1} ~ ip_v4 }
+    ip_v6_v4_embedded = @{ (ip_v6_seg ~ ":"){1,4} ~ ":" ~ ip_v4 }
+        ip_v6_seg = @{ ASCII_HEX_DIGIT{1,4} }
+
+comments = { ";" ~ text } // Basically texts start with ";"
+
+// Record types
+
+A = { A_identifier ~ A_content }
+    A_identifier = { "A" }
+    A_content = @{ ip_v4 }
+
+AAAA = { AAAA_identifier ~ AAAA_content }
+    AAAA_identifier = { "AAAA" }
+    AAAA_content = @{ ip_v6 }
+
+CNAME = { CNAME_identifier ~ CNAME_content }
+    CNAME_identifier = { "CNAME" }
+    CNAME_content = @{ domain }
+
+TXT = { TXT_identifier ~ TXT_content }
+    TXT_identifier = { "TXT" }
+    TXT_content = @{ quoted_string }
+
+SRV = { SRV_identifier ~ SRV_content }
+    SRV_identifier = { "SRV" }
+    SRV_content = @{ weight ~ (WHITESPACE+) ~ port ~ (WHITESPACE+) ~ SRV_target }
+        SRV_target = @{ domain }
+
+MX = { MX_identifier ~ MX_content }
+    MX_identifier = { "MX" }
+    MX_content = @{ MX_host }
+        MX_host = @{ domain }
+
+NS = { NS_identifier ~ NS_content }
+    NS_identifier = { "NS" }
+    NS_content = @{ domain }
+
+SSHFP = { SSHFP_identifier ~ SSHFP_content }
+    SSHFP_identifier = { "SSHFP" }
+    SSHFP_content = @{ algorithm ~ (WHITESPACE+) ~ SSHFP_type ~ (WHITESPACE+) ~ fingerprint }
+        SSHFP_type = @{ ASCII_DIGIT{1} }
+
+URI = { URI_identifier ~ URI_content }
+    URI_identifier = { "URI" }
+    URI_content = @{ weight ~ (WHITESPACE+) ~ URI_target }
+        URI_target = @{ quoted_string }
+
+record_identifier = @{
+    AAAA_identifier | A_identifier | CNAME_identifier | TXT_identifier |
+    SRV_identifier | MX_identifier | NS_identifier | SSHFP_identifier |
+    URI_identifier
+}
+
+record_content = @{
+    AAAA_content | A_content | CNAME_content | TXT_content |
+    SRV_content | MX_content | NS_content | SSHFP_content |
+    URI_content
+}
+
+record = _{
+    AAAA | A | CNAME | TXT | SRV | MX | NS | SSHFP | URI
+}
+
+line = _{ send | update | COMMENT | WHITESPACE | NEWLINE | EOI }
+    send = { "send" }
+    update = { "update" ~ actions }
+        actions = _{ add | delete }
+            add = { "add" ~ domain ~ ttl ~ class ~ record_identifier ~ ((priority ~ record_content) | record_content) }
+            delete = { "delete" ~ domain ~ record_identifier }
+
+nsupdate = {
+    SOI ~
+    (line? ~ NEWLINE)* ~
+    EOI
+}
